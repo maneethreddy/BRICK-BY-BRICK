@@ -1,0 +1,18 @@
+{
+  "short_name": "Habits",
+  "name": "Brick by Brick",
+  "description": "A modern, minimal, dark-themed habit tracker for personal development.",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "./",
+  "background_color": "#090a0f",
+  "theme_color": "#8b5cf6",
+  "display": "standalone",
+  "orientation": "portrait"
+}
