@@ -69,3 +69,24 @@ To make sure your database is secure and unauthorized users cannot write/read ot
    - `VITE_FIREBASE_MESSAGING_SENDER_ID` = `your_messaging_sender_id_here`
    - `VITE_FIREBASE_APP_ID` = `your_app_id_here`
 5. Click **Deploy**. Vercel will bundle the Vite React app and publish it live!
+
+---
+
+## 5. Deploying to Firebase Hosting (Alternative)
+
+If you prefer to keep everything inside the Firebase Console, you can deploy your application to Firebase Hosting:
+
+1. In your local terminal, make sure you are logged in to the Firebase CLI:
+   ```bash
+   npx firebase-tools login
+   ```
+2. Build the project locally to compile production assets:
+   ```bash
+   npm run build
+   ```
+3. Deploy the build output and firestore rules in one command:
+   ```bash
+   npx firebase-tools deploy --project habit-tracker-9f0ab
+   ```
+   *(This will deploy your custom Firestore security rules and your React web application to `https://habit-tracker-9f0ab.web.app` / `https://habit-tracker-9f0ab.firebaseapp.com`.)*
+
