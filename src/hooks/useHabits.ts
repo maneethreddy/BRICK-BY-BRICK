@@ -12,7 +12,7 @@ import {
   updateDoc 
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { formatDateKey, getTodayStr, getYesterdayStr, getDaysInMonthCount } from '../utils/dateUtils';
+import { formatDateKey, getTodayStr, getYesterdayStr, getDaysInMonthCount, isDateLoggable } from '../utils/dateUtils';
 
 export interface Habit {
   id: string;
@@ -66,6 +66,22 @@ export const useHabits = (user: User | null) => {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
+      if (snapshot.empty) {
+        const seededKey = `seeded_${user.uid}`;
+        if (!localStorage.getItem(seededKey)) {
+          localStorage.setItem(seededKey, 'true');
+          addDoc(collection(db, 'habits'), {
+            userId: user.uid,
+            name: 'Wake up at 5:00 am',
+            emoji: '⏰',
+            createdAt: new Date().toISOString()
+          }).catch((err) => {
+            console.error('Failed to seed default habit:', err);
+          });
+        }
+        setHabits([]);
+        return;
+      }
       const list: Habit[] = [];
       snapshot.forEach((doc) => {
         const data = doc.data();
@@ -158,6 +174,15 @@ export const useHabits = (user: User | null) => {
 
   const toggleHabit = (id: string, dateStr: string): boolean => {
     if (!user) return false;
+
+    // Enforce logging window logic
+    const dateParts = dateStr.split('-');
+    const targetDate = new Date(Number(dateParts[0]), Number(dateParts[1]) - 1, Number(dateParts[2]), 12, 0, 0, 0);
+    if (!isDateLoggable(targetDate)) {
+      console.warn(`Cannot log completion. Date ${dateStr} is locked.`);
+      return false;
+    }
+
     const currentCompleted = completions[dateStr] || [];
     const isCompleted = currentCompleted.includes(id);
     let nextCompleted: string[];

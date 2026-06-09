@@ -49,25 +49,55 @@ export const getDatesInMonth = (year: number, month: number): Date[] => {
 };
 
 /**
+ * Determine if a habit completion can be logged for the given date.
+ * User can log:
+ * 1. Today's events.
+ * 2. Yesterday's events, but only if the current local time is before 2:00 AM.
+ */
+export const isDateLoggable = (date: Date): boolean => {
+  const now = new Date();
+  const targetDateStr = formatDateKey(date);
+  const todayDateStr = formatDateKey(now);
+
+  if (targetDateStr === todayDateStr) {
+    return true;
+  }
+
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const yesterdayDateStr = formatDateKey(yesterday);
+
+  if (targetDateStr === yesterdayDateStr) {
+    return now.getHours() < 2;
+  }
+
+  return false;
+};
+
+/**
  * Generate an array of Dates for a GitHub-style heatmap.
  * Returns an array representing approximately the last 365 days,
  * aligned to start on the Sunday of the first week.
  */
 export const getHeatmapDates = (): Date[] => {
   const today = new Date();
+  today.setHours(12, 0, 0, 0);
   
   // Set start date to 364 days ago
   const start = new Date(today);
   start.setDate(today.getDate() - 364);
+  start.setHours(12, 0, 0, 0);
   
   // Shift start back to the nearest Sunday (getDay() === 0)
   const dayOfWeek = start.getDay();
   if (dayOfWeek > 0) {
     start.setDate(start.getDate() - dayOfWeek);
   }
+  start.setHours(12, 0, 0, 0);
   
   const dates: Date[] = [];
   const currentDate = new Date(start);
+  currentDate.setHours(12, 0, 0, 0);
   
   // Go all the way until today
   // We want to fill complete weeks (up to the Saturday of today's week, or just up to today)
@@ -77,10 +107,12 @@ export const getHeatmapDates = (): Date[] => {
   if (endDayOfWeek < 6) {
     end.setDate(end.getDate() + (6 - endDayOfWeek));
   }
+  end.setHours(12, 0, 0, 0);
   
   while (currentDate <= end) {
     dates.push(new Date(currentDate));
     currentDate.setDate(currentDate.getDate() + 1);
+    currentDate.setHours(12, 0, 0, 0);
   }
   
   return dates;

@@ -5,7 +5,8 @@ import {
   formatDateKey, 
   getDatesInMonth, 
   MONTH_NAMES, 
-  WEEKDAYS_SHORT 
+  WEEKDAYS_SHORT,
+  isDateLoggable
 } from '../utils/dateUtils';
 import { playCompleteSound } from '../utils/audio';
 import confetti from 'canvas-confetti';
@@ -266,6 +267,7 @@ export const HabitGrid = ({
                   const isToday = dateStr === todayStr;
                   const dayCompletions = completions[dateStr] || [];
                   const isChecked = dayCompletions.includes(habit.id);
+                  const isLoggable = isDateLoggable(date);
 
                   return (
                     <div
@@ -276,11 +278,21 @@ export const HabitGrid = ({
                     >
                       <button
                         onClick={(e) => handleCellClick(habit.id, date, e)}
-                        className={`w-6 h-6 rounded-md flex items-center justify-center transition-all duration-300 border cursor-pointer ${
+                        disabled={!isLoggable}
+                        className={`w-6 h-6 rounded-md flex items-center justify-center transition-all duration-300 border ${
                           isChecked
-                            ? 'bg-emerald-500 border-emerald-400 text-white shadow-sm shadow-emerald-500/20 hover:bg-emerald-600'
-                            : 'bg-white/[0.02] border-white/10 hover:border-emerald-500/30 text-transparent hover:bg-white/[0.05]'
+                            ? 'bg-emerald-500 border-emerald-400 text-white shadow-sm shadow-emerald-500/20'
+                            : 'bg-white/[0.02] border-white/10 text-transparent'
+                        } ${
+                          isLoggable
+                            ? 'cursor-pointer hover:bg-emerald-600 hover:border-emerald-500/30 hover:bg-white/[0.05]'
+                            : 'cursor-not-allowed opacity-45'
                         }`}
+                        title={
+                          isLoggable
+                            ? `Toggle habit ${habit.name} for ${date.toLocaleDateString('default', { month: 'short', day: 'numeric' })}`
+                            : `Logging locked for ${date.toLocaleDateString('default', { month: 'short', day: 'numeric' })}`
+                        }
                         aria-label={`Toggle habit ${habit.name} on ${dateStr}`}
                       >
                         {isChecked ? (
@@ -298,10 +310,10 @@ export const HabitGrid = ({
                               d="M4.5 12.75l6 6 9-13.5"
                             />
                           </svg>
-                        ) : (
+                        ) : isLoggable ? (
                           // Soft hover dot
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400/40" />
-                        )}
+                        ) : null}
                       </button>
                     </div>
                   );
