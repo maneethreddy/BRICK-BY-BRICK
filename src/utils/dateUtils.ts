@@ -75,17 +75,13 @@ export const isDateLoggable = (date: Date): boolean => {
 };
 
 /**
- * Generate an array of Dates for a GitHub-style heatmap.
- * Returns an array representing approximately the last 365 days,
- * aligned to start on the Sunday of the first week.
+ * Generate an array of Dates for a GitHub-style heatmap for a specific calendar year.
+ * Returns an array representing the full calendar year (Jan 1 to Dec 31),
+ * aligned to start on the Sunday of the first week and end on the Saturday of the last week.
  */
-export const getHeatmapDates = (): Date[] => {
-  const today = new Date();
-  today.setHours(12, 0, 0, 0);
-  
-  // Set start date to 364 days ago
-  const start = new Date(today);
-  start.setDate(today.getDate() - 364);
+export const getHeatmapDates = (year: number): Date[] => {
+  // Start date: January 1 of the selected year
+  const start = new Date(year, 0, 1);
   start.setHours(12, 0, 0, 0);
   
   // Shift start back to the nearest Sunday (getDay() === 0)
@@ -99,10 +95,8 @@ export const getHeatmapDates = (): Date[] => {
   const currentDate = new Date(start);
   currentDate.setHours(12, 0, 0, 0);
   
-  // Go all the way until today
-  // We want to fill complete weeks (up to the Saturday of today's week, or just up to today)
-  // Let's go up to today, but padded to fill the last week
-  const end = new Date(today);
+  // End date: December 31 of the selected year
+  const end = new Date(year, 11, 31);
   const endDayOfWeek = end.getDay();
   if (endDayOfWeek < 6) {
     end.setDate(end.getDate() + (6 - endDayOfWeek));

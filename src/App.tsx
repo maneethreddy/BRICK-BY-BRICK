@@ -376,6 +376,7 @@ function App() {
           <Heatmap
             habits={habits}
             completions={completions}
+            selectedYear={selectedYear}
           />
         </div>
 
