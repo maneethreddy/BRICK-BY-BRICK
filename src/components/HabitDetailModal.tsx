@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
-import { X, Flame, Trophy, CheckCircle2, CalendarDays, Hash, Target } from 'lucide-react';
+import { X, Flame, Trophy, CheckCircle2, CalendarDays, Target, Repeat } from 'lucide-react';
 import type { Habit, DailyCompletions } from '../hooks/useHabits';
-import { DAILY_SCHEDULE } from '../hooks/useHabits';
+import { DAILY_SCHEDULE, countCompletionsInWeek, getWeekStart } from '../hooks/useHabits';
 import { formatDateKey, getHeatmapDates, getDatesInMonth } from '../utils/dateUtils';
 
 interface HabitDetailModalProps {
@@ -13,14 +13,18 @@ interface HabitDetailModalProps {
 const WEEKDAY_LABELS_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const WEEKDAY_LABELS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-/** Format schedule as human-readable string */
-const formatSchedule = (schedule: number[]): string => {
+const formatSchedule = (schedule: number[], timesPerWeek: number): string => {
   const sorted = [...schedule].sort();
-  if (sorted.join(',') === '0,1,2,3,4,5,6') return 'Every day';
+  if (timesPerWeek === 7) return 'Every day';
   if (sorted.join(',') === '1,2,3,4,5') return 'Mon – Fri';
   if (sorted.join(',') === '0,6') return 'Sat & Sun';
-  return sorted.map(d => WEEKDAY_LABELS_SHORT[d]).join(', ');
+  if (sorted.length === timesPerWeek && sorted.length < 7) {
+    return sorted.map(d => WEEKDAY_LABELS_SHORT[d]).join(', ');
+  }
+  return `${timesPerWeek}× / week`;
 };
+
+// ─── Per-habit heatmap ────────────────────────────────────────────────────────
 
 const HabitHeatmap = ({
   habit,
@@ -32,21 +36,21 @@ const HabitHeatmap = ({
   selectedYear: number;
 }) => {
   const dates = useMemo(() => getHeatmapDates(selectedYear), [selectedYear]);
-  const schedule = habit.schedule ?? DAILY_SCHEDULE;
+  const preferredDays = habit.schedule ?? DAILY_SCHEDULE;
 
   const dateCellData = useMemo(() => {
-    const result: { [k: string]: { completed: boolean; scheduled: boolean } } = {};
+    const result: { [k: string]: { completed: boolean; preferred: boolean } } = {};
     dates.forEach(date => {
       const dateStr = formatDateKey(date);
-      const isScheduled = schedule.includes(date.getDay());
+      const isPreferred = preferredDays.includes(date.getDay());
       const dayCompletions = completions[dateStr] || [];
       result[dateStr] = {
-        scheduled: isScheduled,
+        preferred: isPreferred,
         completed: dayCompletions.includes(habit.id)
       };
     });
     return result;
-  }, [dates, completions, habit, schedule]);
+  }, [dates, completions, habit, preferredDays]);
 
   const monthLabels = useMemo(() => {
     const labels: { text: string; colIndex: number }[] = [];
@@ -67,9 +71,9 @@ const HabitHeatmap = ({
     if (isFuture) return 'bg-white/[0.01] border-white/[0.01]';
     const data = dateCellData[dateStr];
     if (!data) return 'bg-white/[0.03] border-white/[0.02]';
-    if (!data.scheduled) return 'bg-white/[0.015] border-white/[0.01] opacity-30';
     if (data.completed) return 'bg-emerald-400 border-emerald-300/30';
-    return 'bg-white/[0.05] border-white/10';
+    if (data.preferred) return 'bg-white/[0.05] border-emerald-500/15'; // preferred but missed
+    return 'bg-white/[0.03] border-white/[0.02]';
   };
 
   return (
@@ -84,10 +88,7 @@ const HabitHeatmap = ({
         </div>
         <div className="flex gap-2">
           <div className="flex flex-col justify-between text-[9px] text-gray-500 font-semibold h-[86px] w-6 py-0.5 select-none leading-none">
-            <span>Sun</span>
-            <span>Tue</span>
-            <span>Thu</span>
-            <span>Sat</span>
+            <span>Sun</span><span>Tue</span><span>Thu</span><span>Sat</span>
           </div>
           <div className="grid grid-rows-7 grid-flow-col gap-1 h-[86px]">
             {dates.map((date, index) => {
@@ -100,19 +101,13 @@ const HabitHeatmap = ({
 
               return (
                 <div key={index} className="group relative">
-                  <div
-                    className={`w-2.5 h-2.5 rounded-[2px] border transition-colors cursor-default ${getCellClass(dateStr, isFuture)}`}
-                  />
+                  <div className={`w-2.5 h-2.5 rounded-[2px] border transition-colors cursor-default ${getCellClass(dateStr, isFuture)}`} />
                   {!isFuture && data && (
                     <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-30 pointer-events-none">
                       <div className="bg-gray-950 border border-white/10 px-2 py-1 rounded-md text-[10px] font-bold text-gray-200 shadow-xl whitespace-nowrap">
-                        {!data.scheduled ? (
-                          <span className="text-gray-500 italic">Rest day</span>
-                        ) : (
-                          <span className={data.completed ? 'text-emerald-400' : 'text-gray-400'}>
-                            {data.completed ? '✓ Completed' : '✗ Missed'}
-                          </span>
-                        )}
+                        <span className={data.completed ? 'text-emerald-400' : 'text-gray-400'}>
+                          {data.completed ? '✓ Completed' : data.preferred ? '○ Preferred — missed' : '· Not logged'}
+                        </span>
                         <div className="text-gray-500 font-medium text-[9px] mt-0.5">{formattedDate}</div>
                       </div>
                       <div className="w-1.5 h-1.5 bg-gray-950 border-r border-b border-white/10 rotate-45 absolute top-full left-1/2 -translate-x-1/2 -translate-y-[4px]" />
@@ -123,155 +118,171 @@ const HabitHeatmap = ({
             })}
           </div>
         </div>
-        {/* Legend */}
         <div className="flex items-center gap-3 text-[10px] text-gray-500 pl-8 mt-1">
-          <div className="flex items-center gap-1">
-            <div className="w-2.5 h-2.5 rounded-[2px] bg-emerald-400 border border-emerald-300/30" />
-            <span>Completed</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <div className="w-2.5 h-2.5 rounded-[2px] bg-white/[0.05] border border-white/10" />
-            <span>Missed</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <div className="w-2.5 h-2.5 rounded-[2px] bg-white/[0.015] border border-white/[0.01] opacity-30" />
-            <span>Rest day</span>
-          </div>
+          <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-[2px] bg-emerald-400 border border-emerald-300/30" /><span>Completed</span></div>
+          <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-[2px] bg-white/[0.05] border border-emerald-500/15" /><span>Preferred day missed</span></div>
+          <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-[2px] bg-white/[0.03] border border-white/[0.02]" /><span>Not logged</span></div>
         </div>
       </div>
     </div>
   );
 };
 
+// ─── Main Modal ───────────────────────────────────────────────────────────────
+
 export const HabitDetailModal = ({ habit, completions, onClose }: HabitDetailModalProps) => {
   const schedule = habit.schedule ?? DAILY_SCHEDULE;
-  const scheduleLabel = formatSchedule(schedule);
-  const daysPerWeek = schedule.length;
+  const timesPerWeek = habit.timesPerWeek ?? schedule.length ?? 7;
+  const scheduleLabel = formatSchedule(schedule, timesPerWeek);
   const selectedYear = new Date().getFullYear();
 
-  // Compute per-habit analytics
   const stats = useMemo(() => {
     const today = new Date();
 
-    // --- Helper: is a date scheduled for THIS habit? ---
-    const isScheduled = (date: Date) => schedule.includes(date.getDay());
-    const isCompleted = (date: Date) => {
+    const isDone = (date: Date) => {
       const dateStr = formatDateKey(date);
       return (completions[dateStr] || []).includes(habit.id);
     };
 
-    // 1. Current Streak — walk backward, skip unscheduled days
+    // ── 1. Current Streak (consecutive days with any completion) ──────────────
     let currentStreak = 0;
     {
-      let offset = 0;
-      // If today is scheduled but not yet done, start from yesterday
-      const todayScheduled = isScheduled(today);
-      const todayDone = isCompleted(today);
-      if (todayScheduled && !todayDone) offset = 1;
-
-      let cap = 0;
-      while (cap < 400) {
+      const hasSomethingToday = isDone(today);
+      const startOffset = hasSomethingToday ? 0 : 1;
+      for (let offset = startOffset; offset < 400; offset++) {
         const d = new Date(today);
         d.setDate(today.getDate() - offset);
-        if (!isScheduled(d)) { offset++; cap++; continue; }
-        if (isCompleted(d)) { currentStreak++; offset++; cap++; }
+        if (isDone(d)) currentStreak++;
         else break;
       }
     }
 
-    // 2. Longest Streak
-    let longestStreak = 0;
+    // ── 2. Weekly Streak (consecutive weeks hitting timesPerWeek target) ──────
+    let weeklyStreak = 0;
     {
-      // Get all dates in selected year as candidates
-      const yearDates: Date[] = [];
-      for (let m = 0; m < 12; m++) {
-        const daysInMonth = new Date(selectedYear, m + 1, 0).getDate();
-        for (let d = 1; d <= daysInMonth; d++) {
-          yearDates.push(new Date(selectedYear, m, d));
+      // Walk back week-by-week from the current week
+      const weekOffset = (weekNum: number): Date => {
+        const d = new Date(today);
+        d.setDate(today.getDate() - weekNum * 7);
+        return d;
+      };
+
+      for (let w = 0; w < 52; w++) {
+        const weekDate = weekOffset(w);
+        const done = countCompletionsInWeek(habit.id, weekDate, completions);
+        if (done >= timesPerWeek) {
+          weeklyStreak++;
+        } else {
+          // For current week that hasn't ended yet — allow partial (at least 1 done)
+          if (w === 0 && done > 0) {
+            // Current week in progress — don't break the streak
+            continue;
+          }
+          break;
         }
       }
+    }
 
+    // ── 3. Longest weekly streak ──────────────────────────────────────────────
+    let longestWeeklyStreak = 0;
+    {
+      const yearStart = new Date(selectedYear, 0, 1);
       let tempStreak = 0;
-      for (const date of yearDates) {
-        if (date > today) break;
-        if (!isScheduled(date)) continue;
-        if (isCompleted(date)) {
+      // Walk week by week from year start to today
+      const cursor = new Date(getWeekStart(yearStart));
+      while (cursor <= today) {
+        const done = countCompletionsInWeek(habit.id, cursor, completions);
+        if (done >= timesPerWeek) {
           tempStreak++;
-          longestStreak = Math.max(longestStreak, tempStreak);
+          longestWeeklyStreak = Math.max(longestWeeklyStreak, tempStreak);
         } else {
           tempStreak = 0;
         }
+        cursor.setDate(cursor.getDate() + 7);
       }
     }
 
-    // 3. All-time completion rate
-    let totalScheduled = 0;
+    // ── 4. All-time completion rate (completions / timesPerWeek per week) ─────
     let totalCompleted = 0;
-    const earliest = habit.createdAt ? new Date(habit.createdAt) : new Date(selectedYear, 0, 1);
-    const cursor = new Date(earliest);
-    cursor.setHours(0, 0, 0, 0);
-    const todayMidnight = new Date(today);
-    todayMidnight.setHours(23, 59, 59, 999);
-
-    while (cursor <= todayMidnight) {
-      if (isScheduled(cursor)) {
-        totalScheduled++;
-        if (isCompleted(cursor)) totalCompleted++;
+    let totalScheduledOpportunities = 0;
+    {
+      const earliest = habit.createdAt ? new Date(habit.createdAt) : new Date(selectedYear, 0, 1);
+      const cursor = new Date(getWeekStart(earliest));
+      while (cursor <= today) {
+        const done = countCompletionsInWeek(habit.id, cursor, completions);
+        totalCompleted += done;
+        totalScheduledOpportunities += timesPerWeek;
+        cursor.setDate(cursor.getDate() + 7);
       }
-      cursor.setDate(cursor.getDate() + 1);
     }
-    const allTimeRate = totalScheduled > 0 ? Math.round((totalCompleted / totalScheduled) * 100) : 0;
+    const allTimeRate = totalScheduledOpportunities > 0
+      ? Math.min(100, Math.round((totalCompleted / totalScheduledOpportunities) * 100))
+      : 0;
 
-    // 4. This month rate
+    // ── 5. This month ─────────────────────────────────────────────────────────
     const now = new Date();
     const dates = getDatesInMonth(now.getFullYear(), now.getMonth());
-    let monthScheduled = 0;
     let monthCompleted = 0;
     dates.forEach(date => {
       if (date > today) return;
-      if (!isScheduled(date)) return;
-      monthScheduled++;
-      if (isCompleted(date)) monthCompleted++;
+      if (isDone(date)) monthCompleted++;
     });
-    const monthRate = monthScheduled > 0 ? Math.round((monthCompleted / monthScheduled) * 100) : 0;
+    const elapsedWeeks = now.getDate() / 7;
+    const expectedMonthCompletions = timesPerWeek * elapsedWeeks;
+    const monthRate = expectedMonthCompletions > 0
+      ? Math.min(100, Math.round((monthCompleted / expectedMonthCompletions) * 100))
+      : 0;
+
+    // ── 6. This week count ────────────────────────────────────────────────────
+    const thisWeekCount = countCompletionsInWeek(habit.id, today, completions);
 
     return {
       currentStreak,
-      longestStreak: Math.max(longestStreak, currentStreak),
+      weeklyStreak,
+      longestWeeklyStreak: Math.max(longestWeeklyStreak, weeklyStreak),
       allTimeRate,
       monthRate,
       monthCompleted,
-      monthScheduled,
       totalCompleted,
-      totalScheduled
+      thisWeekCount
     };
-  }, [habit, completions, schedule, selectedYear]);
+  }, [habit, completions, timesPerWeek, selectedYear]);
 
   const statCards = [
     {
       icon: <Flame className="w-5 h-5 text-amber-400" />,
-      label: 'Current Streak',
+      label: 'Day Streak',
       value: `${stats.currentStreak}`,
       unit: stats.currentStreak === 1 ? 'day' : 'days',
-      sub: stats.currentStreak > 0 ? "Keep it up! 🔥" : "Start today!",
+      sub: stats.currentStreak > 0 ? "Consecutive days logged 🔥" : "Log today to start!",
       color: 'text-amber-400',
       border: 'hover:border-amber-500/30'
     },
     {
       icon: <Trophy className="w-5 h-5 text-yellow-400" />,
-      label: 'Longest Streak',
-      value: `${stats.longestStreak}`,
-      unit: stats.longestStreak === 1 ? 'day' : 'days',
-      sub: 'Personal best 🏆',
+      label: 'Weekly Streak',
+      value: `${stats.weeklyStreak}`,
+      unit: stats.weeklyStreak === 1 ? 'week' : 'weeks',
+      sub: `Best: ${stats.longestWeeklyStreak}w — hit ${timesPerWeek}×/wk`,
       color: 'text-yellow-400',
       border: 'hover:border-yellow-500/30'
+    },
+    {
+      icon: <Repeat className="w-5 h-5 text-violet-400" />,
+      label: 'This Week',
+      value: `${stats.thisWeekCount}`,
+      unit: `/ ${timesPerWeek}`,
+      sub: stats.thisWeekCount >= timesPerWeek ? 'Week target met! 🎉' : `${timesPerWeek - stats.thisWeekCount} more to hit target`,
+      color: stats.thisWeekCount >= timesPerWeek ? 'text-emerald-400' : 'text-violet-400',
+      border: stats.thisWeekCount >= timesPerWeek ? 'hover:border-emerald-500/30' : 'hover:border-violet-500/30',
+      progress: Math.min(100, Math.round((stats.thisWeekCount / timesPerWeek) * 100))
     },
     {
       icon: <CheckCircle2 className="w-5 h-5 text-emerald-400" />,
       label: 'This Month',
       value: `${stats.monthRate}%`,
       unit: '',
-      sub: `${stats.monthCompleted} of ${stats.monthScheduled} scheduled days`,
+      sub: `${stats.monthCompleted} completions this month`,
       color: 'text-emerald-400',
       border: 'hover:border-emerald-500/30',
       progress: stats.monthRate
@@ -281,45 +292,29 @@ export const HabitDetailModal = ({ habit, completions, onClose }: HabitDetailMod
       label: 'All-Time Rate',
       value: `${stats.allTimeRate}%`,
       unit: '',
-      sub: `${stats.totalCompleted} of ${stats.totalScheduled} days`,
+      sub: `${stats.totalCompleted} total completions`,
       color: 'text-pink-400',
       border: 'hover:border-pink-500/30',
       progress: stats.allTimeRate
     },
     {
-      icon: <Hash className="w-5 h-5 text-blue-400" />,
-      label: 'Total Completions',
-      value: `${stats.totalCompleted}`,
-      unit: 'times',
-      sub: 'All time ✅',
-      color: 'text-blue-400',
-      border: 'hover:border-blue-500/30'
-    },
-    {
-      icon: <CalendarDays className="w-5 h-5 text-violet-400" />,
-      label: 'Weekly Frequency',
-      value: `${daysPerWeek}`,
+      icon: <CalendarDays className="w-5 h-5 text-blue-400" />,
+      label: 'Frequency',
+      value: `${timesPerWeek}`,
       unit: 'days/week',
       sub: scheduleLabel,
-      color: 'text-violet-400',
-      border: 'hover:border-violet-500/30'
+      color: 'text-blue-400',
+      border: 'hover:border-blue-500/30'
     }
   ];
 
-  // Close on overlay click
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-      {/* Overlay */}
-      <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-        onClick={onClose}
-      />
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
 
-      {/* Sheet/Dialog */}
-      <div className="w-full sm:max-w-2xl rounded-t-3xl sm:rounded-2xl border border-white/10 glass-panel shadow-2xl relative z-10 max-h-[92vh] overflow-y-auto">
+      <div className="w-full sm:max-w-2xl rounded-t-3xl sm:rounded-2xl border border-white/10 glass-panel shadow-2xl relative z-10 max-h-[92vh] overflow-y-auto animate-zoom-in">
         {/* Header */}
         <div className="flex justify-between items-start px-5 pt-6 pb-4 border-b border-white/5 sticky top-0 glass-panel z-10">
-          {/* Mobile drag handle */}
           <div className="absolute top-2.5 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-white/20 sm:hidden" />
 
           <div className="flex items-center gap-3">
@@ -332,16 +327,12 @@ export const HabitDetailModal = ({ habit, completions, onClose }: HabitDetailMod
                 <span className="text-xs text-emerald-400 font-semibold bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/15">
                   {scheduleLabel}
                 </span>
-                <span className="text-xs text-gray-500 font-medium">{daysPerWeek}d/week</span>
+                <span className="text-xs text-gray-500 font-medium">{timesPerWeek}×/week</span>
               </div>
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex-shrink-0"
-            aria-label="Close"
-          >
+          <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer flex-shrink-0">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -354,7 +345,7 @@ export const HabitDetailModal = ({ habit, completions, onClose }: HabitDetailMod
               {statCards.map((card, i) => (
                 <div
                   key={i}
-                  className={`group relative flex flex-col justify-between p-4 rounded-xl glass-panel border border-white/5 transition-all duration-300 hover:translate-y-[-1px] ${card.border}`}
+                  className={`group flex flex-col justify-between p-4 rounded-xl glass-panel border border-white/5 transition-all duration-300 hover:translate-y-[-1px] ${card.border}`}
                 >
                   <div className="flex justify-between items-start mb-2">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">{card.label}</span>
@@ -367,7 +358,7 @@ export const HabitDetailModal = ({ habit, completions, onClose }: HabitDetailMod
                       {card.value}
                       {card.unit && <span className="text-sm font-semibold text-gray-400 ml-1">{card.unit}</span>}
                     </span>
-                    <p className="text-[11px] text-gray-500 mt-0.5 font-medium truncate">{card.sub}</p>
+                    <p className="text-[11px] text-gray-500 mt-0.5 font-medium">{card.sub}</p>
                   </div>
                   {card.progress !== undefined && (
                     <div className="w-full h-1 bg-white/5 rounded-full mt-3 overflow-hidden">
@@ -382,28 +373,33 @@ export const HabitDetailModal = ({ habit, completions, onClose }: HabitDetailMod
             </div>
           </div>
 
-          {/* Schedule Tags */}
-          <div>
-            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Active Days</h3>
-            <div className="flex gap-2 flex-wrap">
-              {WEEKDAY_LABELS_FULL.map((label, idx) => {
-                const isActive = schedule.includes(idx);
-                return (
-                  <div
-                    key={idx}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
-                      isActive
-                        ? 'bg-emerald-600/15 border-emerald-500/30 text-emerald-300'
-                        : 'bg-white/[0.02] border-white/5 text-gray-600'
-                    }`}
-                  >
-                    {label.slice(0, 3)}
-                    {!isActive && <span className="ml-1 text-[9px] text-gray-700">off</span>}
-                  </div>
-                );
-              })}
+          {/* Preferred days display */}
+          {schedule.length < 7 && (
+            <div>
+              <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Preferred Days</h3>
+              <div className="flex gap-2 flex-wrap">
+                {WEEKDAY_LABELS_FULL.map((label, idx) => {
+                  const isPreferred = schedule.includes(idx);
+                  return (
+                    <div
+                      key={idx}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                        isPreferred
+                          ? 'bg-emerald-600/15 border-emerald-500/30 text-emerald-300'
+                          : 'bg-white/[0.02] border-white/5 text-gray-600'
+                      }`}
+                    >
+                      {label.slice(0, 3)}
+                      {!isPreferred && <span className="ml-1 text-[9px] text-gray-700">not preferred</span>}
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-[10px] text-gray-600 mt-2">
+                ⚡ Completing on non-preferred days still counts towards your {timesPerWeek}×/week target.
+              </p>
             </div>
-          </div>
+          )}
 
           {/* Yearly Heatmap */}
           <div>

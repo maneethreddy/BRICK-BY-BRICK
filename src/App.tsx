@@ -118,15 +118,15 @@ function App() {
     e.target.value = ''; // Clear file input
   };
 
-  // --- Add/Edit Habit Modal Submission — now accepts schedule ---
-  const handleHabitSubmit = async (name: string, emoji: string, schedule: number[]) => {
+  // --- Add/Edit Habit Modal Submission — now accepts schedule + timesPerWeek ---
+  const handleHabitSubmit = async (name: string, emoji: string, schedule: number[], timesPerWeek: number) => {
     try {
       if (editingHabit) {
-        await editHabit(editingHabit.id, name, emoji, schedule);
+        await editHabit(editingHabit.id, name, emoji, schedule, timesPerWeek);
         showToast(`Updated habit: ${name}`, "success");
         setEditingHabit(null);
       } else {
-        await addHabit(name, emoji, schedule);
+        await addHabit(name, emoji, schedule, timesPerWeek);
         showToast(`Created habit: ${name}`, "success");
       }
     } catch (e: any) {

@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
 import type { Habit, DailyCompletions } from '../hooks/useHabits';
-import { getScheduledHabitsForDate } from '../hooks/useHabits';
 import { getDatesInMonth, formatDateKey } from '../utils/dateUtils';
 import { BarChart3, Sparkles, AlertTriangle, CalendarCheck, Percent } from 'lucide-react';
 
@@ -19,94 +18,74 @@ export const Analytics = ({
 }: AnalyticsProps) => {
   const analyticsData = useMemo(() => {
     if (habits.length === 0) {
-      return {
-        bestHabit: null,
-        worstHabit: null,
-        consistencyRate: 0,
-        totalCompletedDays: 0,
-        avgDailyCompletion: 0
-      };
+      return { bestHabit: null, worstHabit: null, consistencyRate: 0, totalCompletedDays: 0, avgDailyCompletion: 0 };
     }
 
     const dates = getDatesInMonth(selectedYear, selectedMonth);
     const today = new Date();
-    
-    // Per-habit completion counters (vs scheduled days only)
-    const habitScheduledCount: { [id: string]: number } = {};
-    const habitCompletedCount: { [id: string]: number } = {};
-    habits.forEach(h => {
-      habitScheduledCount[h.id] = 0;
-      habitCompletedCount[h.id] = 0;
-    });
+    const elapsedDays = selectedYear === today.getFullYear() && selectedMonth === today.getMonth()
+      ? today.getDate()
+      : (selectedYear > today.getFullYear() || (selectedYear === today.getFullYear() && selectedMonth > today.getMonth()))
+        ? 0
+        : dates.length;
 
-    let scheduledActiveDays = 0; // Days with at least 1 habit scheduled & elapsed
-    let completedActiveDays = 0; // Days with at least 1 scheduled habit completed
+    if (elapsedDays === 0) {
+      return { bestHabit: null, worstHabit: null, consistencyRate: 0, totalCompletedDays: 0, avgDailyCompletion: 0 };
+    }
+
+    // Per-habit: count completions in the selected month
+    const habitCompletionCounts: { [id: string]: number } = {};
+    habits.forEach(h => { habitCompletionCounts[h.id] = 0; });
+
+    let totalCompletedDays = 0;
     let sumDailyPercentages = 0;
 
     dates.forEach(date => {
+      const dayNum = date.getDate();
+      if (dayNum > elapsedDays) return;
+
       const dateStr = formatDateKey(date);
-      const isFuture = date > today;
-      if (isFuture) return;
-
-      const scheduledForDay = getScheduledHabitsForDate(habits, date);
-      if (scheduledForDay.length === 0) return; // skip rest days from averages
-
-      scheduledActiveDays++;
-
       const dayCompletions = completions[dateStr] || [];
-      const validCompletions = dayCompletions.filter(id => scheduledForDay.some(h => h.id === id));
+      const validCompletions = dayCompletions.filter(id => habits.some(h => h.id === id));
 
-      // Per-habit tallying
-      scheduledForDay.forEach(h => {
-        habitScheduledCount[h.id]++;
-        if (validCompletions.includes(h.id)) {
-          habitCompletedCount[h.id]++;
-        }
+      validCompletions.forEach(id => {
+        if (habitCompletionCounts[id] !== undefined) habitCompletionCounts[id]++;
       });
 
-      // Track completed days
-      if (validCompletions.length > 0) {
-        completedActiveDays++;
-      }
+      if (validCompletions.length > 0) totalCompletedDays++;
 
-      // Track sum of daily completion rate (scheduled only)
-      const dailyRate = (validCompletions.length / scheduledForDay.length) * 100;
+      // Daily score: average of each habit's weekly progress
+      // Simplified: completions that day vs average daily target
+      const avgDailyTarget = habits.reduce((sum, h) => sum + (h.timesPerWeek / 7), 0);
+      const dailyRate = avgDailyTarget > 0
+        ? Math.min(100, (validCompletions.length / avgDailyTarget) * 100)
+        : 0;
       sumDailyPercentages += dailyRate;
     });
 
-    // Best & worst habits (by completion rate over scheduled days)
+    // Best/worst by completion count this month
     let bestHabitId = '';
-    let bestRate = -1;
+    let maxCount = -1;
     let worstHabitId = '';
-    let worstRate = Infinity;
+    let minCount = Infinity;
 
-    Object.keys(habitScheduledCount).forEach(id => {
-      if (habitScheduledCount[id] === 0) return;
-      const rate = habitCompletedCount[id] / habitScheduledCount[id];
-      if (rate > bestRate) { bestRate = rate; bestHabitId = id; }
-      if (rate < worstRate) { worstRate = rate; worstHabitId = id; }
+    Object.keys(habitCompletionCounts).forEach(id => {
+      const count = habitCompletionCounts[id];
+      if (count > maxCount) { maxCount = count; bestHabitId = id; }
+      if (count < minCount) { minCount = count; worstHabitId = id; }
     });
 
     const bestHabit = habits.find(h => h.id === bestHabitId) || null;
     const worstHabit = habits.find(h => h.id === worstHabitId) || null;
-    const bestHabitCount = habitCompletedCount[bestHabitId] ?? 0;
-    const worstHabitCount = habitCompletedCount[worstHabitId] ?? 0;
 
-    // Consistency Rate: days with at least 1 scheduled completion / all scheduled active days
-    const consistencyRate = scheduledActiveDays > 0
-      ? Math.round((completedActiveDays / scheduledActiveDays) * 100)
-      : 0;
-
-    // Average Daily Completion Rate (over scheduled active days)
-    const avgDailyCompletion = scheduledActiveDays > 0
-      ? Math.round(sumDailyPercentages / scheduledActiveDays)
-      : 0;
+    const consistencyRate = elapsedDays > 0 ? Math.round((totalCompletedDays / elapsedDays) * 100) : 0;
+    const avgDailyCompletion = elapsedDays > 0 ? Math.round(sumDailyPercentages / elapsedDays) : 0;
 
     return {
-      bestHabit: bestRate > 0 ? { habit: bestHabit, count: bestHabitCount } : null,
-      worstHabit: worstRate < Infinity && habits.length > 1 ? { habit: worstHabit, count: worstHabitCount } : null,
+      bestHabit: maxCount > 0 ? { habit: bestHabit, count: maxCount } : null,
+      worstHabit: minCount < Infinity && habits.length > 1 ? { habit: worstHabit, count: minCount } : null,
       consistencyRate,
-      totalCompletedDays: completedActiveDays,
+      totalCompletedDays,
       avgDailyCompletion
     };
   }, [habits, completions, selectedYear, selectedMonth]);
@@ -131,14 +110,14 @@ export const Analytics = ({
     {
       title: "Consistency",
       value: `${consistencyRate}%`,
-      subtext: `${totalCompletedDays} active days logged`,
+      subtext: `${totalCompletedDays} days with at least 1 check`,
       icon: <CalendarCheck className="w-5 h-5 text-emerald-400" />,
       colorClass: "text-emerald-400"
     },
     {
       title: "Avg Daily Score",
       value: `${avgDailyCompletion}%`,
-      subtext: "Avg of scheduled days only",
+      subtext: "Avg completions vs daily target",
       icon: <Percent className="w-5 h-5 text-pink-400" />,
       colorClass: "text-pink-400"
     }
@@ -158,23 +137,14 @@ export const Analytics = ({
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {statItems.map((item, idx) => (
-            <div
-              key={idx}
-              className="flex items-center gap-4 p-4 rounded-xl border border-white/5 bg-white/[0.01] hover:bg-white/[0.02] transition-colors"
-            >
+            <div key={idx} className="flex items-center gap-4 p-4 rounded-xl border border-white/5 bg-white/[0.01] hover:bg-white/[0.02] transition-colors">
               <div className="p-3 rounded-lg bg-white/5 border border-white/5 flex-shrink-0">
                 {item.icon}
               </div>
               <div className="flex-1 min-w-0">
-                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">
-                  {item.title}
-                </span>
-                <span className={`text-base font-extrabold truncate block mt-0.5 ${item.colorClass}`}>
-                  {item.value}
-                </span>
-                <span className="text-xs text-gray-400 block mt-0.5 truncate font-medium">
-                  {item.subtext}
-                </span>
+                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">{item.title}</span>
+                <span className={`text-base font-extrabold truncate block mt-0.5 ${item.colorClass}`}>{item.value}</span>
+                <span className="text-xs text-gray-400 block mt-0.5 truncate font-medium">{item.subtext}</span>
               </div>
             </div>
           ))}
