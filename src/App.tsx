@@ -11,6 +11,7 @@ import { Heatmap } from './components/Heatmap';
 import { ProgressChart } from './components/ProgressChart';
 import { Analytics } from './components/Analytics';
 import { HabitModal } from './components/HabitModal';
+import { HabitDetailModal } from './components/HabitDetailModal';
 import { KeyboardShortcuts } from './components/KeyboardShortcuts';
 import { Toast } from './components/Toast';
 import type { ToastProps } from './components/Toast';
@@ -60,6 +61,7 @@ function App() {
   const [editingHabit, setEditingHabit] = useState<Habit | null>(null);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [isGoalSettingsOpen, setIsGoalSettingsOpen] = useState(false);
+  const [selectedDetailHabit, setSelectedDetailHabit] = useState<Habit | null>(null);
   const [toast, setToast] = useState<Omit<ToastProps, 'onClose'> | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -116,15 +118,15 @@ function App() {
     e.target.value = ''; // Clear file input
   };
 
-  // --- Add/Edit Habit Modal Submission ---
-  const handleHabitSubmit = async (name: string, emoji: string) => {
+  // --- Add/Edit Habit Modal Submission — now accepts schedule ---
+  const handleHabitSubmit = async (name: string, emoji: string, schedule: number[]) => {
     try {
       if (editingHabit) {
-        await editHabit(editingHabit.id, name, emoji);
+        await editHabit(editingHabit.id, name, emoji, schedule);
         showToast(`Updated habit: ${name}`, "success");
         setEditingHabit(null);
       } else {
-        await addHabit(name, emoji);
+        await addHabit(name, emoji, schedule);
         showToast(`Created habit: ${name}`, "success");
       }
     } catch (e: any) {
@@ -149,6 +151,10 @@ function App() {
         showToast("Failed to delete habit.", "error");
       }
     }
+  };
+
+  const handleViewHabitDetail = (habit: Habit) => {
+    setSelectedDetailHabit(habit);
   };
 
   // --- Global Keyboard Shortcuts ---
@@ -216,26 +222,26 @@ function App() {
       />
 
       {/* Main Container */}
-      <div className="w-full max-w-7xl mx-auto px-4 py-8 flex-1 flex flex-col gap-6 md:px-6">
+      <div className="w-full max-w-7xl mx-auto px-3 sm:px-4 py-6 sm:py-8 flex-1 flex flex-col gap-5 sm:gap-6 md:px-6">
         
         {/* Header Section */}
-        <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between border-b border-white/5 pb-6">
+        <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between border-b border-white/5 pb-5 sm:pb-6">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-emerald-400 flex items-center justify-center shadow-lg shadow-emerald-950/40">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-emerald-400 flex items-center justify-center shadow-lg shadow-emerald-950/40 flex-shrink-0">
               <CheckSquare className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="text-2xl font-black tracking-tight bg-gradient-to-r from-white via-gray-200 to-gray-400 bg-clip-text text-transparent">
+              <h1 className="text-xl sm:text-2xl font-black tracking-tight bg-gradient-to-r from-white via-gray-200 to-gray-400 bg-clip-text text-transparent">
                 Brick by Brick
               </h1>
-              <p className="text-xs text-gray-500 font-bold tracking-wider uppercase">
+              <p className="text-[10px] sm:text-xs text-gray-500 font-bold tracking-wider uppercase">
                 Personal Progress Tracker
               </p>
             </div>
           </div>
 
           {/* Action Tools */}
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             {/* User Profile Info */}
             <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/5 border border-white/5 text-xs text-gray-400 font-medium">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -244,37 +250,37 @@ function App() {
 
             <button
               onClick={() => setIsGoalSettingsOpen(!isGoalSettingsOpen)}
-              className={`px-3 py-1.5 rounded-xl border text-sm font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+              className={`px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs sm:text-sm font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
                 isGoalSettingsOpen
                   ? 'bg-emerald-600/10 border-emerald-500/30 text-emerald-300'
                   : 'bg-white/5 border-white/5 text-gray-300 hover:text-white hover:bg-white/10'
               }`}
             >
               <Sliders className="w-4 h-4" />
-              Goal: {monthlyGoal}%
+              <span className="hidden sm:inline">Goal:</span> {monthlyGoal}%
             </button>
 
             <button
               onClick={handleExport}
-              className="px-3 py-1.5 rounded-xl bg-white/5 border border-white/5 text-sm font-semibold hover:bg-white/10 text-gray-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer"
+              className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-white/5 border border-white/5 text-xs sm:text-sm font-semibold hover:bg-white/10 text-gray-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer"
               title="Export JSON backup (E)"
             >
               <Download className="w-4 h-4" />
-              Export
+              <span className="hidden sm:inline">Export</span>
             </button>
 
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="px-3 py-1.5 rounded-xl bg-white/5 border border-white/5 text-sm font-semibold hover:bg-white/10 text-gray-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer"
+              className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-white/5 border border-white/5 text-xs sm:text-sm font-semibold hover:bg-white/10 text-gray-300 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer"
               title="Import JSON backup (I)"
             >
               <Upload className="w-4 h-4" />
-              Import
+              <span className="hidden sm:inline">Import</span>
             </button>
 
             <button
               onClick={() => setIsShortcutsOpen(true)}
-              className="p-2 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 text-gray-300 hover:text-white transition-all cursor-pointer"
+              className="p-2 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 text-gray-300 hover:text-white transition-all cursor-pointer hidden sm:flex"
               title="Shortcuts (?)"
             >
               <Keyboard className="w-4.5 h-4.5" />
@@ -282,11 +288,11 @@ function App() {
 
             <button
               onClick={handleSignOut}
-              className="px-3 py-1.5 rounded-xl bg-white/5 border border-white/5 text-sm font-semibold hover:bg-rose-500/15 hover:border-rose-500/20 text-gray-300 hover:text-rose-400 transition-all flex items-center gap-1.5 cursor-pointer"
+              className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-white/5 border border-white/5 text-xs sm:text-sm font-semibold hover:bg-rose-500/15 hover:border-rose-500/20 text-gray-300 hover:text-rose-400 transition-all flex items-center gap-1.5 cursor-pointer"
               title="Sign Out"
             >
               <LogOut className="w-4 h-4" />
-              Sign Out
+              <span className="hidden sm:inline">Sign Out</span>
             </button>
 
             <button
@@ -294,7 +300,7 @@ function App() {
                 setEditingHabit(null);
                 setIsAddModalOpen(true);
               }}
-              className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm font-bold text-white shadow-lg shadow-emerald-950/40 hover:shadow-emerald-900/50 hover:translate-y-[-1px] transition-all flex items-center gap-1.5 cursor-pointer"
+              className="px-3 sm:px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs sm:text-sm font-bold text-white shadow-lg shadow-emerald-950/40 hover:shadow-emerald-900/50 hover:translate-y-[-1px] transition-all flex items-center gap-1.5 cursor-pointer"
               title="Add new habit (N)"
             >
               <Plus className="w-4 h-4" />
@@ -305,14 +311,14 @@ function App() {
 
         {/* Goal Settings Expandable Panel */}
         {isGoalSettingsOpen && (
-          <div className="p-4 rounded-xl border border-emerald-500/20 bg-emerald-950/10 backdrop-blur-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-fade-in">
+          <div className="p-4 rounded-xl border border-emerald-500/20 bg-emerald-950/10 backdrop-blur-md flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex-1">
               <h4 className="text-sm font-bold text-white">Monthly Completion Target</h4>
               <p className="text-xs text-gray-400 mt-0.5">
-                Set the percentage of habit logs you aim to complete each month. Adjusting this updates the Monthly Completion metric cards.
+                Set the percentage of habit logs you aim to complete each month.
               </p>
             </div>
-            <div className="flex items-center gap-4 min-w-[200px]">
+            <div className="flex items-center gap-4 sm:min-w-[200px]">
               <input
                 type="range"
                 min="10"
@@ -330,12 +336,12 @@ function App() {
         )}
 
         {/* Motivational Quote banner */}
-        <div className="p-4 rounded-2xl glass-panel border border-white/5 flex gap-3.5 items-start">
-          <div className="p-2.5 rounded-xl bg-white/5 text-emerald-400 border border-white/5 flex-shrink-0">
-            <Quote className="w-5 h-5" />
+        <div className="p-4 rounded-2xl glass-panel border border-white/5 flex gap-3 sm:gap-3.5 items-start">
+          <div className="p-2 sm:p-2.5 rounded-xl bg-white/5 text-emerald-400 border border-white/5 flex-shrink-0">
+            <Quote className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-medium text-gray-200 italic leading-relaxed">
+            <p className="text-xs sm:text-sm font-medium text-gray-200 italic leading-relaxed">
               "{quote.text}"
             </p>
             <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider mt-1.5">
@@ -358,6 +364,7 @@ function App() {
             setEditingHabit(null);
             setIsAddModalOpen(true);
           }}
+          onViewHabitDetail={handleViewHabitDetail}
           selectedYear={selectedYear}
           selectedMonth={selectedMonth}
           setSelectedYear={setSelectedYear}
@@ -365,7 +372,7 @@ function App() {
         />
 
         {/* Double Column Graph & Heatmap */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-6">
           <ProgressChart
             habits={habits}
             completions={completions}
@@ -389,9 +396,9 @@ function App() {
         />
         
         {/* Footer */}
-        <footer className="text-center py-6 text-[10px] text-gray-500 font-semibold tracking-wider uppercase border-t border-white/5 mt-4 flex justify-between items-center">
-          <span>&copy; {new Date().getFullYear()} Brick by Brick</span>
-          <span className="flex items-center gap-1">
+        <footer className="text-center py-5 text-[10px] text-gray-500 font-semibold tracking-wider uppercase border-t border-white/5 mt-2 flex flex-col sm:flex-row justify-between items-center gap-2">
+          <span>© {new Date().getFullYear()} Brick by Brick</span>
+          <span className="hidden sm:flex items-center gap-1">
             <kbd className="px-1.5 py-0.5 rounded border border-white/10 bg-white/5 text-[9px]">?</kbd>
             Press "?" for shortcuts panel
           </span>
@@ -408,6 +415,15 @@ function App() {
         onSubmit={handleHabitSubmit}
         habitToEdit={editingHabit}
       />
+
+      {/* Habit Detail Analytics Modal */}
+      {selectedDetailHabit && (
+        <HabitDetailModal
+          habit={selectedDetailHabit}
+          completions={completions}
+          onClose={() => setSelectedDetailHabit(null)}
+        />
+      )}
 
       {/* Keyboard Shortcuts Help Modal */}
       <KeyboardShortcuts

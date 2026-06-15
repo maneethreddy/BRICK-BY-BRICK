@@ -1,6 +1,7 @@
 import React, { useRef, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, Edit2, Trash2, Plus, Calendar } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Edit2, Trash2, Plus, Calendar, BarChart2 } from 'lucide-react';
 import type { Habit, DailyCompletions } from '../hooks/useHabits';
+import { DAILY_SCHEDULE } from '../hooks/useHabits';
 import { 
   formatDateKey, 
   getDatesInMonth, 
@@ -18,6 +19,7 @@ interface HabitGridProps {
   onEditHabit: (habit: Habit) => void;
   onDeleteHabit: (id: string) => void;
   onAddHabit: () => void;
+  onViewHabitDetail: (habit: Habit) => void;
   selectedYear: number;
   selectedMonth: number; // 0-indexed
   setSelectedYear: React.Dispatch<React.SetStateAction<number>>;
@@ -31,6 +33,7 @@ export const HabitGrid = ({
   onEditHabit,
   onDeleteHabit,
   onAddHabit,
+  onViewHabitDetail,
   selectedYear,
   selectedMonth,
   setSelectedYear,
@@ -84,26 +87,24 @@ export const HabitGrid = ({
     };
   }, [selectedYear, selectedMonth]);
 
-  const handleCellClick = (habitId: string, date: Date, e: React.MouseEvent<HTMLButtonElement>) => {
+  const handleCellClick = (habit: Habit, date: Date, e: React.MouseEvent<HTMLButtonElement>) => {
     const dateStr = formatDateKey(date);
-    const isNowCompleted = toggleHabit(habitId, dateStr);
+    const isNowCompleted = toggleHabit(habit.id, dateStr);
 
     if (isNowCompleted) {
       // Play ding sound
       playCompleteSound();
 
-      // Trigger confetti only if the cell checked is for today or yesterday (reinforce action)
+      // Trigger confetti only if the cell checked is for today or yesterday
       const diffTime = Math.abs(today.getTime() - date.getTime());
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
       
       if (diffDays <= 1) {
-        // Add completion pulse to cell
         e.currentTarget.classList.add('completed-pulse');
         setTimeout(() => {
           e.currentTarget?.classList.remove('completed-pulse');
         }, 400);
 
-        // Burst confetti from the button's screen coordinates
         const rect = e.currentTarget.getBoundingClientRect();
         confetti({
           particleCount: 25,
@@ -120,18 +121,18 @@ export const HabitGrid = ({
   };
 
   return (
-    <div className="flex flex-col gap-4 p-6 rounded-2xl glass-panel border border-white/5">
+    <div className="flex flex-col gap-4 p-4 sm:p-6 rounded-2xl glass-panel border border-white/5">
       {/* Month Navigator Header */}
-      <div className="flex flex-wrap justify-between items-center gap-4 border-b border-white/5 pb-4">
+      <div className="flex flex-wrap justify-between items-center gap-3 border-b border-white/5 pb-4">
         <div className="flex items-center gap-2">
-          {/* Decorative Window Controls matching mockup */}
-          <div className="flex gap-1.5 mr-2">
+          {/* Decorative Window Controls */}
+          <div className="flex gap-1.5 mr-2 hidden sm:flex">
             <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f56]" />
             <span className="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]" />
             <span className="w-2.5 h-2.5 rounded-full bg-[#27c93f]" />
           </div>
           <Calendar className="w-5 h-5 text-emerald-400" />
-          <h2 className="text-xl font-bold text-white tracking-tight">
+          <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
             {MONTH_NAMES[selectedMonth]} {selectedYear}
           </h2>
         </div>
@@ -139,7 +140,7 @@ export const HabitGrid = ({
         <div className="flex items-center gap-2">
           <button
             onClick={setTodayMonth}
-            className="px-3 py-1.5 rounded-xl bg-white/5 border border-white/5 text-sm font-semibold hover:bg-white/10 text-gray-300 hover:text-white transition-all cursor-pointer"
+            className="px-2.5 py-1.5 rounded-xl bg-white/5 border border-white/5 text-xs sm:text-sm font-semibold hover:bg-white/10 text-gray-300 hover:text-white transition-all cursor-pointer"
           >
             Today
           </button>
@@ -180,7 +181,7 @@ export const HabitGrid = ({
           {/* Table Header (Dates) */}
           <div className="flex border-b border-white/5">
             {/* Sticky Habit Header Column */}
-            <div className="sticky left-0 w-52 min-w-[13rem] p-3 font-semibold text-xs uppercase text-gray-400 bg-[#0e1612]/90 backdrop-blur-md border-r border-white/5 flex items-center justify-between z-20">
+            <div className="sticky left-0 w-32 min-w-[8rem] sm:w-52 sm:min-w-[13rem] p-3 font-semibold text-xs uppercase text-gray-400 bg-[#0e1612]/90 backdrop-blur-md border-r border-white/5 flex items-center justify-between z-20">
               <span>Habit</span>
               <button 
                 onClick={onAddHabit}
@@ -234,29 +235,41 @@ export const HabitGrid = ({
                 className="flex border-b border-white/5 last:border-b-0 hover:bg-white/[0.01] transition-colors"
               >
                 {/* Sticky Row Title */}
-                <div className="sticky left-0 w-52 min-w-[13rem] p-3 flex items-center justify-between bg-[#0c1410]/90 backdrop-blur-md border-r border-white/5 group z-20">
-                  <div className="flex items-center gap-2 overflow-hidden pr-2">
-                    <span className="text-lg flex-shrink-0">{habit.emoji}</span>
-                    <span className="text-sm font-semibold text-gray-200 truncate" title={habit.name}>
+                <div className="sticky left-0 w-32 min-w-[8rem] sm:w-52 sm:min-w-[13rem] p-2 sm:p-3 flex items-center justify-between bg-[#0c1410]/90 backdrop-blur-md border-r border-white/5 group z-20">
+                  {/* Clickable habit name/emoji area */}
+                  <button
+                    onClick={() => onViewHabitDetail(habit)}
+                    className="flex items-center gap-1.5 sm:gap-2 overflow-hidden pr-1 flex-1 text-left hover:opacity-80 transition-opacity cursor-pointer"
+                    title={`View analytics for ${habit.name}`}
+                  >
+                    <span className="text-base sm:text-lg flex-shrink-0">{habit.emoji}</span>
+                    <span className="text-xs sm:text-sm font-semibold text-gray-200 truncate" title={habit.name}>
                       {habit.name}
                     </span>
-                  </div>
+                  </button>
                   
-                  {/* Action Buttons (Visible on Hover / Mobile friendly) */}
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {/* Action Buttons (Visible on Hover) */}
+                  <div className="flex items-center gap-0.5 sm:gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                     <button
                       onClick={() => onEditHabit(habit)}
                       className="p-1 rounded-md hover:bg-white/10 text-gray-400 hover:text-white transition-colors cursor-pointer"
-                      title="Edit name/icon"
+                      title="Edit"
                     >
-                      <Edit2 className="w-3.5 h-3.5" />
+                      <Edit2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                     </button>
                     <button
                       onClick={() => onDeleteHabit(habit.id)}
                       className="p-1 rounded-md hover:bg-rose-500/20 text-gray-400 hover:text-rose-400 transition-colors cursor-pointer"
-                      title="Delete habit"
+                      title="Delete"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => onViewHabitDetail(habit)}
+                      className="p-1 rounded-md hover:bg-emerald-500/20 text-gray-400 hover:text-emerald-400 transition-colors cursor-pointer hidden sm:flex"
+                      title="View habit analytics"
+                    >
+                      <BarChart2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
@@ -269,52 +282,66 @@ export const HabitGrid = ({
                   const isChecked = dayCompletions.includes(habit.id);
                   const isLoggable = isDateLoggable(date);
 
+                  // Check if this day is in habit's schedule
+                  const dayOfWeek = date.getDay();
+                  const isScheduled = (habit.schedule ?? DAILY_SCHEDULE).includes(dayOfWeek);
+
                   return (
                     <div
                       key={`${habit.id}-${dateStr}`}
                       className={`w-10 min-w-[2.5rem] h-11 flex items-center justify-center border-r border-white/5 last:border-r-0 relative ${
                         isToday ? 'bg-emerald-500/5' : ''
-                      }`}
+                      } ${!isScheduled ? 'off-day-cell' : ''}`}
                     >
-                      <button
-                        onClick={(e) => handleCellClick(habit.id, date, e)}
-                        disabled={!isLoggable}
-                        className={`w-6 h-6 rounded-md flex items-center justify-center transition-all duration-300 border ${
-                          isChecked
-                            ? 'bg-emerald-500 border-emerald-400 text-white shadow-sm shadow-emerald-500/20'
-                            : 'bg-white/[0.02] border-white/10 text-transparent'
-                        } ${
-                          isLoggable
-                            ? 'cursor-pointer hover:bg-emerald-600 hover:border-emerald-500/30 hover:bg-white/[0.05]'
-                            : 'cursor-not-allowed opacity-45'
-                        }`}
-                        title={
-                          isLoggable
-                            ? `Toggle habit ${habit.name} for ${date.toLocaleDateString('default', { month: 'short', day: 'numeric' })}`
-                            : `Logging locked for ${date.toLocaleDateString('default', { month: 'short', day: 'numeric' })}`
-                        }
-                        aria-label={`Toggle habit ${habit.name} on ${dateStr}`}
-                      >
-                        {isChecked ? (
-                          <svg
-                            className="w-4 h-4"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="3.5"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              className="animate-checkmark"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M4.5 12.75l6 6 9-13.5"
-                            />
-                          </svg>
-                        ) : isLoggable ? (
-                          // Soft hover dot
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400/40" />
-                        ) : null}
-                      </button>
+                      {isScheduled ? (
+                        <button
+                          onClick={(e) => handleCellClick(habit, date, e)}
+                          disabled={!isLoggable}
+                          className={`w-6 h-6 rounded-md flex items-center justify-center transition-all duration-300 border ${
+                            isChecked
+                              ? 'bg-emerald-500 border-emerald-400 text-white shadow-sm shadow-emerald-500/20'
+                              : 'bg-white/[0.02] border-white/10 text-transparent'
+                          } ${
+                            isLoggable
+                              ? 'cursor-pointer hover:bg-emerald-600 hover:border-emerald-500/30 hover:bg-white/[0.05]'
+                              : 'cursor-not-allowed opacity-45'
+                          }`}
+                          title={
+                            isLoggable
+                              ? `Toggle ${habit.name} for ${date.toLocaleDateString('default', { month: 'short', day: 'numeric' })}`
+                              : `Logging locked for ${date.toLocaleDateString('default', { month: 'short', day: 'numeric' })}`
+                          }
+                          aria-label={`Toggle habit ${habit.name} on ${dateStr}`}
+                        >
+                          {isChecked ? (
+                            <svg
+                              className="w-4 h-4"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="3.5"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                className="animate-checkmark"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M4.5 12.75l6 6 9-13.5"
+                              />
+                            </svg>
+                          ) : isLoggable ? (
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400/40" />
+                          ) : null}
+                        </button>
+                      ) : (
+                        /* Off-day indicator */
+                        <div
+                          className="w-6 h-6 rounded-md flex items-center justify-center cursor-default"
+                          title={`${WEEKDAYS_SHORT[date.getDay()]} is a rest day for "${habit.name}"`}
+                        >
+                          {/* Subtle dash */}
+                          <span className="w-3 h-[1.5px] rounded-full bg-white/10 block" />
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -324,9 +351,10 @@ export const HabitGrid = ({
         </div>
       </div>
       
-      {/* Mobile Hint */}
-      <div className="block sm:hidden text-center text-xs text-gray-400 italic">
-        Swipe left/right on the table to see other days of the month.
+      {/* Mobile: swipe hint + tap-to-view tip */}
+      <div className="flex flex-col items-center gap-1 sm:hidden text-center">
+        <span className="text-[10px] text-gray-500 font-medium">← Swipe to see other days</span>
+        <span className="text-[10px] text-gray-600">Tap habit name to view analytics</span>
       </div>
     </div>
   );

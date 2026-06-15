@@ -12,13 +12,15 @@ import {
   updateDoc 
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { formatDateKey, getTodayStr, getYesterdayStr, getDaysInMonthCount, isDateLoggable } from '../utils/dateUtils';
+import { formatDateKey, getTodayStr, getDaysInMonthCount, isDateLoggable } from '../utils/dateUtils';
 
 export interface Habit {
   id: string;
   name: string;
   emoji: string;
   createdAt: string;
+  /** Days of week the habit is scheduled. 0=Sun, 1=Mon, ..., 6=Sat. Defaults to daily [0-6]. */
+  schedule: number[];
 }
 
 export interface DailyCompletions {
@@ -34,6 +36,17 @@ export interface HabitStats {
 }
 
 const LOCAL_STORAGE_KEY_GOAL = 'antigravity_habit_tracker_goal';
+
+/** Default daily schedule — all 7 days */
+export const DAILY_SCHEDULE: number[] = [0, 1, 2, 3, 4, 5, 6];
+
+/**
+ * Given a date, return which habits from the list are scheduled for that day.
+ */
+export const getScheduledHabitsForDate = (habits: Habit[], date: Date): Habit[] => {
+  const dayOfWeek = date.getDay(); // 0=Sun … 6=Sat
+  return habits.filter(h => (h.schedule ?? DAILY_SCHEDULE).includes(dayOfWeek));
+};
 
 export const useHabits = (user: User | null) => {
   const [habits, setHabits] = useState<Habit[]>([]);
@@ -74,6 +87,7 @@ export const useHabits = (user: User | null) => {
             userId: user.uid,
             name: 'Wake up at 5:00 am',
             emoji: '⏰',
+            schedule: DAILY_SCHEDULE,
             createdAt: new Date().toISOString()
           }).catch((err) => {
             console.error('Failed to seed default habit:', err);
@@ -89,6 +103,7 @@ export const useHabits = (user: User | null) => {
           id: doc.id,
           name: data.name || '',
           emoji: data.emoji || '📝',
+          schedule: Array.isArray(data.schedule) ? data.schedule : DAILY_SCHEDULE,
           createdAt: data.createdAt || new Date().toISOString()
         });
       });
@@ -131,21 +146,23 @@ export const useHabits = (user: User | null) => {
   }, [user]);
 
   // --- Firestore Actions ---
-  const addHabit = async (name: string, emoji: string) => {
+  const addHabit = async (name: string, emoji: string, schedule: number[] = DAILY_SCHEDULE) => {
     if (!user) throw new Error("User must be logged in to create a habit.");
     await addDoc(collection(db, 'habits'), {
       userId: user.uid,
       name,
       emoji: emoji.trim() || '📝',
+      schedule,
       createdAt: new Date().toISOString()
     });
   };
 
-  const editHabit = async (id: string, name: string, emoji: string) => {
+  const editHabit = async (id: string, name: string, emoji: string, schedule: number[] = DAILY_SCHEDULE) => {
     if (!user) throw new Error("User must be logged in to edit a habit.");
     await updateDoc(doc(db, 'habits', id), {
       name,
-      emoji: emoji.trim()
+      emoji: emoji.trim(),
+      schedule
     });
   };
 
@@ -216,7 +233,7 @@ export const useHabits = (user: User | null) => {
   // --- Backup Actions ---
   const exportData = (): string => {
     const backup = {
-      version: '1.1',
+      version: '1.2',
       habits,
       completions,
       monthlyGoal
@@ -235,6 +252,7 @@ export const useHabits = (user: User | null) => {
             userId: user.uid,
             name: h.name,
             emoji: h.emoji || '📝',
+            schedule: Array.isArray(h.schedule) ? h.schedule : DAILY_SCHEDULE,
             createdAt: h.createdAt || new Date().toISOString()
           });
         }
@@ -268,105 +286,169 @@ export const useHabits = (user: User | null) => {
   // --- Real-time Statistics Calculations (Memoized) ---
   const statistics = useMemo<HabitStats>(() => {
     const todayStr = getTodayStr();
-    const yesterdayStr = getYesterdayStr();
+    const today = new Date();
     
-    // 1. Today's Score
+    // 1. Today's Score — only count habits scheduled for today
+    const todayDayOfWeek = today.getDay();
+    const scheduledToday = habits.filter(h => (h.schedule ?? DAILY_SCHEDULE).includes(todayDayOfWeek));
     const completedToday = completions[todayStr] || [];
-    const validCompletedToday = completedToday.filter(id => habits.some(h => h.id === id));
-    const todayScore = habits.length > 0 
-      ? Math.round((validCompletedToday.length / habits.length) * 100) 
-      : 0;
+    const validCompletedToday = completedToday.filter(id => scheduledToday.some(h => h.id === id));
+    const todayScore = scheduledToday.length > 0 
+      ? Math.round((validCompletedToday.length / scheduledToday.length) * 100) 
+      : 100; // Rest day — all habits scheduled for today are satisfied
 
-    // 2. Total completions count
+    // 2. Total completions count (all time, for any active habit regardless of schedule)
     let totalCompletionsCount = 0;
     Object.values(completions).forEach(ids => {
       totalCompletionsCount += ids.filter(id => habits.some(h => h.id === id)).length;
     });
 
-    // 3. Current Streak
-    let currentStreak = 0;
-    let checkDate = new Date();
-    
-    const hasCompletionsToday = (completions[todayStr] || [])
-      .some(id => habits.some(h => h.id === id));
-      
-    const hasCompletionsYesterday = (completions[yesterdayStr] || [])
-      .some(id => habits.some(h => h.id === id));
+    // --- Helper: does a given date (Date obj) have any completion for any scheduled habit? ---
+    const hasAnyScheduledCompletion = (date: Date): boolean => {
+      const dateStr = formatDateKey(date);
+      const scheduled = getScheduledHabitsForDate(habits, date);
+      if (scheduled.length === 0) return true; // rest day, don't break streak
+      const dayCompletions = completions[dateStr] || [];
+      return dayCompletions.some(id => scheduled.some(h => h.id === id));
+    };
 
-    if (hasCompletionsToday) {
-      currentStreak = 1;
-      checkDate.setDate(checkDate.getDate() - 1);
-      while (true) {
-        const dateStr = formatDateKey(checkDate);
-        const hasCompletions = (completions[dateStr] || [])
-          .some(id => habits.some(h => h.id === id));
-          
-        if (hasCompletions) {
-          currentStreak++;
-          checkDate.setDate(checkDate.getDate() - 1);
-        } else {
-          break;
-        }
+    // --- Helper: is this day a pure rest day (no habits scheduled at all)? ---
+    const isRestDay = (date: Date): boolean => {
+      return getScheduledHabitsForDate(habits, date).length === 0;
+    };
+
+    // 3. Current Streak — walk backward, skip rest days
+    let currentStreak = 0;
+
+    // If today isn't done yet (no completions), check if yesterday counts to keep streak alive
+    // But we still start from today and walk back
+    let dayOffset = 0;
+    while (true) {
+      const checkDate = new Date(today);
+      checkDate.setDate(today.getDate() - dayOffset);
+
+      if (isRestDay(checkDate)) {
+        // skip rest days silently (they don't break/advance streak)
+        dayOffset++;
+        if (dayOffset > 400) break; // safety cap
+        continue;
       }
-    } else if (hasCompletionsYesterday) {
-      currentStreak = 1;
-      checkDate.setDate(checkDate.getDate() - 2);
-      while (true) {
-        const dateStr = formatDateKey(checkDate);
-        const hasCompletions = (completions[dateStr] || [])
-          .some(id => habits.some(h => h.id === id));
-          
-        if (hasCompletions) {
-          currentStreak++;
-          checkDate.setDate(checkDate.getDate() - 1);
-        } else {
-          break;
-        }
+
+      const done = hasAnyScheduledCompletion(checkDate);
+      if (done) {
+        currentStreak++;
+        dayOffset++;
+      } else {
+        break;
       }
     }
 
-    // 4. Longest Streak
-    const completedDates = Object.keys(completions)
-      .filter(dateStr => (completions[dateStr] || []).some(id => habits.some(h => h.id === id)))
-      .sort();
+    // If today has no completion yet, streak starts from yesterday
+    // Handle: today hasn't been completed yet — re-check starting from yesterday
+    {
+      const todayScheduled = getScheduledHabitsForDate(habits, today);
+      const todayCompletionsArr = completions[todayStr] || [];
+      const todayDone = todayCompletionsArr.some(id => todayScheduled.some(h => h.id === id));
 
-    let longestStreak = 0;
-    if (completedDates.length > 0) {
-      let tempStreak = 1;
-      let prevDate = new Date(completedDates[0]);
-      
-      for (let i = 1; i < completedDates.length; i++) {
-        const currDate = new Date(completedDates[i]);
-        const diffTime = currDate.getTime() - prevDate.getTime();
-        const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
-        
-        if (diffDays === 1) {
-          tempStreak++;
-        } else if (diffDays > 1) {
-          longestStreak = Math.max(longestStreak, tempStreak);
-          tempStreak = 1;
+      if (!todayDone && todayScheduled.length > 0) {
+        // Recompute streak starting from yesterday
+        let streak = 0;
+        let offset = 1;
+        while (true) {
+          const d = new Date(today);
+          d.setDate(today.getDate() - offset);
+          if (isRestDay(d)) { offset++; if (offset > 400) break; continue; }
+          const done = (() => {
+            const dStr = formatDateKey(d);
+            const sched = getScheduledHabitsForDate(habits, d);
+            if (sched.length === 0) return true;
+            const dc = completions[dStr] || [];
+            return dc.some(id => sched.some(h => h.id === id));
+          })();
+          if (done) { streak++; offset++; } else { break; }
         }
-        prevDate = currDate;
+        currentStreak = streak;
+      }
+    }
+
+    // 4. Longest Streak — walk all completion dates considering schedule
+    let longestStreak = 0;
+    {
+      // Gather all unique date strings across completions
+      const allDateStrs = new Set<string>(Object.keys(completions));
+      const sortedDates = Array.from(allDateStrs).sort();
+
+      let tempStreak = 0;
+      let prevDate: Date | null = null;
+
+      for (const dateStr of sortedDates) {
+        const parts = dateStr.split('-');
+        const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+        const sched = getScheduledHabitsForDate(habits, d);
+        if (sched.length === 0) continue; // skip rest days
+
+        const dc = completions[dateStr] || [];
+        const done = dc.some(id => sched.some(h => h.id === id));
+
+        if (!done) {
+          longestStreak = Math.max(longestStreak, tempStreak);
+          tempStreak = 0;
+          prevDate = null;
+          continue;
+        }
+
+        if (prevDate === null) {
+          tempStreak = 1;
+        } else {
+          // Walk from prevDate+1 to d, skipping rest days
+          let walkDate = new Date(prevDate);
+          walkDate.setDate(walkDate.getDate() + 1);
+          let broken = false;
+          while (formatDateKey(walkDate) !== dateStr) {
+            if (!isRestDay(walkDate)) {
+              // There's a non-rest-day between prev and current that has no completion
+              const wStr = formatDateKey(walkDate);
+              const ws = getScheduledHabitsForDate(habits, walkDate);
+              const wc = completions[wStr] || [];
+              const wDone = wc.some(id => ws.some(h => h.id === id));
+              if (!wDone) { broken = true; break; }
+            }
+            walkDate.setDate(walkDate.getDate() + 1);
+          }
+          if (broken) {
+            longestStreak = Math.max(longestStreak, tempStreak);
+            tempStreak = 1;
+          } else {
+            tempStreak++;
+          }
+        }
+        prevDate = d;
       }
       longestStreak = Math.max(longestStreak, tempStreak);
     }
 
-    // 5. Monthly Completion Rate
+    // 5. Monthly Completion Rate — scheduled days only
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth();
     const daysInMonth = getDaysInMonthCount(currentYear, currentMonth);
     
-    let monthlyCompletions = 0;
+    let monthlyCompletedScheduled = 0;
+    let monthlyTotalScheduled = 0;
+
     for (let day = 1; day <= daysInMonth; day++) {
-      const dateStr = formatDateKey(new Date(currentYear, currentMonth, day));
+      const date = new Date(currentYear, currentMonth, day);
+      if (date > now) break; // don't count future days
+      const scheduled = getScheduledHabitsForDate(habits, date);
+      const dateStr = formatDateKey(date);
       const dayCompletions = completions[dateStr] || [];
-      monthlyCompletions += dayCompletions.filter(id => habits.some(h => h.id === id)).length;
+      const completed = dayCompletions.filter(id => scheduled.some(h => h.id === id));
+      monthlyTotalScheduled += scheduled.length;
+      monthlyCompletedScheduled += completed.length;
     }
-    
-    const totalPossibleMonthly = habits.length * daysInMonth;
-    const monthlyCompletionRate = totalPossibleMonthly > 0
-      ? Math.round((monthlyCompletions / totalPossibleMonthly) * 100)
+
+    const monthlyCompletionRate = monthlyTotalScheduled > 0
+      ? Math.round((monthlyCompletedScheduled / monthlyTotalScheduled) * 100)
       : 0;
 
     return {

@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import type { Habit, DailyCompletions } from '../hooks/useHabits';
+import { getScheduledHabitsForDate } from '../hooks/useHabits';
 import { getHeatmapDates, formatDateKey } from '../utils/dateUtils';
 import { Flame } from 'lucide-react';
 
@@ -12,49 +13,50 @@ interface HeatmapProps {
 export const Heatmap = ({ habits, completions, selectedYear }: HeatmapProps) => {
   const dates = useMemo(() => getHeatmapDates(selectedYear), [selectedYear]);
 
-  // Calculate stats for heatmap
-  const stats = useMemo(() => {
-    let maxCompletions = 0;
-    const dateCounts: { [dateStr: string]: number } = {};
+  // Calculate per-day completion ratio against scheduled habits
+  const dateCellData = useMemo(() => {
+    const result: { [dateStr: string]: { count: number; scheduled: number; ratio: number; isRestDay: boolean } } = {};
 
     dates.forEach(date => {
       const dateStr = formatDateKey(date);
+      const scheduled = getScheduledHabitsForDate(habits, date);
       const dayCompletions = completions[dateStr] || [];
-      // Only count completions of active habits
-      const count = dayCompletions.filter(id => habits.some(h => h.id === id)).length;
-      dateCounts[dateStr] = count;
-      if (count > maxCompletions) {
-        maxCompletions = count;
-      }
+      const count = dayCompletions.filter(id => scheduled.some(h => h.id === id)).length;
+      const isRestDay = scheduled.length === 0;
+      const ratio = scheduled.length > 0 ? count / scheduled.length : 0;
+
+      result[dateStr] = { count, scheduled: scheduled.length, ratio, isRestDay };
     });
 
-    return { dateCounts, maxCompletions };
+    return result;
   }, [dates, completions, habits]);
 
-  const { dateCounts } = stats;
-
-  // Function to determine cell color level (0 to 4)
-  const getCellColorClass = (count: number, isFuture: boolean) => {
+  // Function to determine cell color level based on ratio
+  const getCellColorClass = (dateStr: string, isFuture: boolean) => {
     if (isFuture) return 'bg-white/[0.01] border-white/[0.01] cursor-default';
-    if (habits.length === 0 || count === 0) return 'bg-white/[0.03] border-white/[0.02] hover:bg-white/[0.08]';
     
-    const ratio = count / habits.length;
+    const data = dateCellData[dateStr];
+    if (!data) return 'bg-white/[0.03] border-white/[0.02] hover:bg-white/[0.08]';
     
+    if (data.isRestDay || habits.length === 0) {
+      return 'bg-white/[0.015] border-white/[0.01] cursor-default opacity-40';
+    }
+    if (data.count === 0) return 'bg-white/[0.03] border-white/[0.02] hover:bg-white/[0.08]';
+    
+    const { ratio } = data;
     if (ratio <= 0.25) return 'bg-emerald-950/70 border-emerald-900/10 hover:bg-emerald-950 text-emerald-400';
     if (ratio <= 0.5) return 'bg-emerald-800/60 border-emerald-700/20 hover:bg-emerald-800 text-emerald-300';
     if (ratio <= 0.75) return 'bg-emerald-600/80 border-emerald-500/20 hover:bg-emerald-600 text-emerald-200';
     return 'bg-emerald-400 border-emerald-300/30 hover:bg-emerald-300 text-black';
   };
 
-  // Build month labels along the top (approximate week indices for start of months)
+  // Build month labels along the top
   const monthLabels = useMemo(() => {
     const labels: { text: string; colIndex: number }[] = [];
     let lastMonth = -1;
 
-    // Loop through weeks (dates in chunks of 7)
     for (let i = 0; i < dates.length; i += 7) {
       const weekDates = dates.slice(i, i + 7);
-      // Find the first date in this week that belongs to the selectedYear
       const targetDate = weekDates.find(d => d.getFullYear() === selectedYear) || weekDates[0];
       const month = targetDate.getMonth();
       if (month !== lastMonth) {
@@ -69,11 +71,11 @@ export const Heatmap = ({ habits, completions, selectedYear }: HeatmapProps) => 
   }, [dates, selectedYear]);
 
   return (
-    <div className="flex flex-col gap-4 p-6 rounded-2xl glass-panel border border-white/5">
+    <div className="flex flex-col gap-4 p-5 sm:p-6 rounded-2xl glass-panel border border-white/5">
       <div className="flex justify-between items-center border-b border-white/5 pb-4">
         <div className="flex items-center gap-2">
           <Flame className="w-5 h-5 text-emerald-400" />
-          <h2 className="text-xl font-bold text-white tracking-tight">Contribution Heatmap</h2>
+          <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">Contribution Heatmap</h2>
         </div>
         <div className="flex items-center gap-2 text-xs text-gray-400">
           <span>Less</span>
@@ -94,7 +96,7 @@ export const Heatmap = ({ habits, completions, selectedYear }: HeatmapProps) => 
               <span
                 key={idx}
                 className="absolute"
-                style={{ left: `${(label.colIndex * 14) + 32}px` }} // 14px = 10px (cell) + 4px (gap-1)
+                style={{ left: `${(label.colIndex * 14) + 32}px` }}
               >
                 {label.text}
               </span>
@@ -114,14 +116,15 @@ export const Heatmap = ({ habits, completions, selectedYear }: HeatmapProps) => 
             <div className="grid grid-rows-7 grid-flow-col gap-1 h-[86px]">
               {dates.map((date, index) => {
                 const dateStr = formatDateKey(date);
-                const count = dateCounts[dateStr] || 0;
+                const data = dateCellData[dateStr];
+                const count = data?.count ?? 0;
+                const scheduled = data?.scheduled ?? 0;
+                const isRestDay = data?.isRestDay ?? false;
                 
-                // Compare with current local time (midnight check)
                 const todayMidnight = new Date();
                 todayMidnight.setHours(0, 0, 0, 0);
                 const isFuture = date.getTime() > todayMidnight.getTime();
                 
-                // Friendly date format for tooltip
                 const formattedDate = date.toLocaleDateString('default', {
                   weekday: 'short',
                   month: 'short',
@@ -133,20 +136,26 @@ export const Heatmap = ({ habits, completions, selectedYear }: HeatmapProps) => 
                   <div key={index} className="group relative">
                     <button
                       className={`w-2.5 h-2.5 rounded-[2px] border transition-colors cursor-default focus:outline-none ${getCellColorClass(
-                        count,
+                        dateStr,
                         isFuture
                       )}`}
                       aria-label={`${count} completions on ${formattedDate}`}
                     />
                     
-                    {/* Premium CSS Tooltip - Only for present/past dates */}
+                    {/* Tooltip */}
                     {!isFuture && (
                       <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-30 pointer-events-none">
                         <div className="bg-gray-950 border border-white/10 px-2 py-1 rounded-md text-[10px] font-bold text-gray-200 shadow-xl whitespace-nowrap">
-                          <span className="text-emerald-400 font-extrabold">{count}</span> {count === 1 ? 'habit' : 'habits'} completed
+                          {isRestDay ? (
+                            <span className="text-gray-500 italic">Rest day</span>
+                          ) : (
+                            <>
+                              <span className="text-emerald-400 font-extrabold">{count}</span>
+                              <span className="text-gray-400">/{scheduled} scheduled</span>
+                            </>
+                          )}
                           <div className="text-gray-500 font-medium text-[9px] mt-0.5">{formattedDate}</div>
                         </div>
-                        {/* Tooltip arrow */}
                         <div className="w-1.5 h-1.5 bg-gray-950 border-r border-b border-white/10 rotate-45 absolute top-full left-1/2 -translate-x-1/2 -translate-y-[4px]" />
                       </div>
                     )}
